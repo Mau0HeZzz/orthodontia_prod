@@ -4267,14 +4267,23 @@
                 if (!formField.hasAttribute("data-placeholder-nohide")) formField.dataset.placeholder = formField.placeholder;
             }));
             document.body.addEventListener("focusin", (function(e) {
-                const targetElement = e.target;
-                if (targetElement.tagName === "INPUT" || targetElement.tagName === "TEXTAREA") {
+                let targetElement = e.target;
+                if (targetElement.tagName === "INPUT" || targetElement.tagName === "TEXTAREA" || targetElement.closest(".select")) {
+                    if (targetElement.closest(".select")) targetElement = targetElement.closest(".select").querySelector("select");
                     if (targetElement.dataset.placeholder) targetElement.placeholder = "";
                     if (!targetElement.hasAttribute("data-no-focus-classes")) {
                         targetElement.classList.add("_form-focus");
                         targetElement.parentElement.classList.add("_form-focus");
                     }
-                    formValidate.removeError(targetElement);
+                    if (targetElement.type === "radio") {
+                        const parent = targetElement.closest("[data-radio-parent]");
+                        parent ? formValidate.removeError(parent) : null;
+                        let name = targetElement.name;
+                        document.querySelectorAll(`[name="${name}"]`).forEach((e => {
+                            formValidate.removeError(e);
+                        }));
+                        formValidate.removeError(targetElement);
+                    } else formValidate.removeError(targetElement);
                 }
             }));
             document.body.addEventListener("input", (function(e) {
@@ -4309,27 +4318,33 @@
             }));
         }
         let formValidate = {
-            getErrors(form) {
+            getErrors(form, validate) {
                 let error = 0;
                 let formRequiredItems = form.querySelectorAll("*[data-required]");
                 if (formRequiredItems.length) formRequiredItems.forEach((formRequiredItem => {
-                    if ((formRequiredItem.offsetParent !== null || formRequiredItem.tagName === "SELECT") && !formRequiredItem.disabled) error += this.validateInput(formRequiredItem);
+                    if ((formRequiredItem.offsetParent !== null || formRequiredItem.tagName === "SELECT") && !formRequiredItem.disabled) error += this.validateInput(formRequiredItem, validate);
                 }));
                 return error;
             },
-            validateInput(formRequiredItem) {
+            validateInput(formRequiredItem, validate = true) {
                 let error = 0;
                 if (formRequiredItem.dataset.required === "email") {
                     formRequiredItem.value = formRequiredItem.value.replace(" ", "");
                     if (this.emailTest(formRequiredItem)) {
-                        this.addError(formRequiredItem);
+                        validate ? this.addError(formRequiredItem) : null;
                         error++;
                     } else this.removeError(formRequiredItem);
                 } else if (formRequiredItem.type === "checkbox" && !formRequiredItem.checked) {
-                    this.addError(formRequiredItem);
+                    validate ? this.addError(formRequiredItem) : null;
                     error++;
+                } else if (formRequiredItem.type === "radio") {
+                    let name = formRequiredItem.name;
+                    if (!document.querySelector(`input[name="${name}"]:checked`)) {
+                        validate ? this.addError(formRequiredItem) : null;
+                        error++;
+                    } else this.removeError(formRequiredItem);
                 } else if (!formRequiredItem.value.trim()) {
-                    this.addError(formRequiredItem);
+                    validate ? this.addError(formRequiredItem) : null;
                     error++;
                 } else this.removeError(formRequiredItem);
                 return error;
@@ -4337,14 +4352,17 @@
             addError(formRequiredItem) {
                 formRequiredItem.classList.add("_form-error");
                 formRequiredItem.parentElement.classList.add("_form-error");
-                let inputError = formRequiredItem.parentElement.querySelector(".form__error");
-                if (inputError) formRequiredItem.parentElement.removeChild(inputError);
-                if (formRequiredItem.dataset.error) formRequiredItem.parentElement.insertAdjacentHTML("beforeend", `<div class="form__error">${formRequiredItem.dataset.error}</div>`);
+                const parent = formRequiredItem.closest("[data-radio-parent]") ? formRequiredItem.closest("[data-radio-parent]") : formRequiredItem.parentElement;
+                let inputError = parent.querySelector(".form__error");
+                if (inputError) parent.removeChild(inputError);
+                if (formRequiredItem.dataset.error) parent.insertAdjacentHTML("beforeend", `<div class="form__error">${formRequiredItem.dataset.error}</div>`);
             },
             removeError(formRequiredItem) {
                 formRequiredItem.classList.remove("_form-error");
+                const parent = formRequiredItem.closest("[data-radio-parent]") ? formRequiredItem.closest("[data-radio-parent]") : formRequiredItem.parentElement;
                 formRequiredItem.parentElement.classList.remove("_form-error");
-                if (formRequiredItem.parentElement.querySelector(".form__error")) formRequiredItem.parentElement.removeChild(formRequiredItem.parentElement.querySelector(".form__error"));
+                parent.classList.remove("_form-error");
+                if (parent.querySelector(".form__error")) parent.removeChild(parent.querySelector(".form__error"));
             },
             formClean(form) {
                 form.reset();
@@ -4424,7 +4442,9 @@
                     } else if (form.hasAttribute("data-dev")) {
                         e.preventDefault();
                         formSent(form, {
-                            success: true
+                            success: true,
+                            findemail: false,
+                            message: `\n        <p><strong>Мы отправили ссылку для активации учетной записи.</strong></p>\n        <p>Если письма нет во Входящих и в папке Спам, напишите нам через форму обратной связи с сайта</p>`
                         });
                     }
                 } else {
@@ -4496,7 +4516,7 @@
                 };
                 this._this = this;
                 if (this.config.init) {
-                    const selectItems = data ? document.querySelectorAll(data) : document.querySelectorAll("select");
+                    const selectItems = data ? document.querySelectorAll(data) : document.querySelectorAll("[data-custom-select]");
                     if (selectItems.length) {
                         this.selectsInit(selectItems);
                         this.setLogging(`Проснулся, построил селектов: (${selectItems.length})`);
@@ -4599,6 +4619,7 @@
                 const originalSelect = this.getSelectElement(selectItem).originalSelect;
                 const selectOptions = this.getSelectElement(selectItem, this.selectClasses.classSelectOptions).selectElement;
                 if (!selectOptions.classList.contains("_slide")) {
+                    selectItem.parentElement.classList.remove(this.selectClasses.classSelectOpen);
                     selectItem.classList.remove(this.selectClasses.classSelectOpen);
                     _slideUp(selectOptions, originalSelect.dataset.speed);
                 }
@@ -4612,6 +4633,7 @@
                 }
                 if (!selectOptions.classList.contains("_slide")) {
                     selectItem.classList.toggle(this.selectClasses.classSelectOpen);
+                    selectItem.parentElement.classList.toggle(this.selectClasses.classSelectOpen);
                     _slideToggle(selectOptions, originalSelect.dataset.speed);
                 }
             }
@@ -4638,6 +4660,7 @@
                     pseudoAttributeClass = ` ${this.selectClasses.classSelectPseudoLabel}`;
                 }
                 this.getSelectedOptionsData(originalSelect).values.length ? selectItem.classList.add(this.selectClasses.classSelectActive) : selectItem.classList.remove(this.selectClasses.classSelectActive);
+                this.getSelectedOptionsData(originalSelect).values.length ? selectItem.parentElement.classList.add(this.selectClasses.classSelectActive) : selectItem.parentElement.classList.remove(this.selectClasses.classSelectActive);
                 if (originalSelect.hasAttribute("data-search")) return `<div class="${this.selectClasses.classSelectTitle}"><span${pseudoAttribute} class="${this.selectClasses.classSelectValue}"><input autocomplete="off" type="text" placeholder="${selectTitleValue}" data-placeholder="${selectTitleValue}" class="${this.selectClasses.classSelectInput}"></span></div>`; else {
                     const customClass = this.getSelectedOptionsData(originalSelect).elements.length && this.getSelectedOptionsData(originalSelect).elements[0].dataset.class ? ` ${this.getSelectedOptionsData(originalSelect).elements[0].dataset.class}` : "";
                     return `<button type="button" class="${this.selectClasses.classSelectTitle}"><span${pseudoAttribute} class="${this.selectClasses.classSelectValue}${pseudoAttributeClass}"><span class="${this.selectClasses.classSelectContent}${customClass}">${selectTitleValue}</span></span></button>`;
@@ -10930,10 +10953,13 @@
             searchBox ? searchActions(searchBox) : null;
             const sideMenu = document.querySelector(".sidemenu");
             sideMenu ? sideMenuActions(sideMenu) : null;
+            const middleSubMenuParents = document.querySelectorAll("[data-middlesubmenu-parent]");
+            const middleSubMenuChildrens = document.querySelectorAll("[data-middlesubmenu-children]");
+            if (middleSubMenuParents.length && middleSubMenuChildrens.length) subMenuActions(middleSubMenuParents, middleSubMenuChildrens);
         }));
         document.addEventListener("formSent", (e => {
             const form = e.detail.form;
-            const {success} = e.detail.responseResult;
+            const {success, findemail, message} = e.detail.responseResult;
             if (form.closest("#authPopup") && success) {
                 const phoneInput = form.querySelector("[data-phone]");
                 const phoneOutput = document.querySelector("#pinPopup .authPopup__subtitle span");
@@ -10955,14 +10981,62 @@
                     pinCodeTimer ? setPinCodeTimer(pinCodeTimer.dataset.timer, pinCodeTimer) : null;
                 })) : null;
             }
+            if (form.closest("#authEmailPopup") && !findemail) {
+                const emailInput = form.querySelector("[data-email-input]");
+                if (emailInput.value !== "") {
+                    let email = emailInput.value;
+                    const emailRegisterInput = document.querySelector("#registerStepOne [data-email-input]");
+                    if (emailRegisterInput) {
+                        emailRegisterInput.value = email;
+                        emailRegisterInput.classList.add("_form-input");
+                        emailRegisterInput.parentElement.classList.add("_form-input");
+                    }
+                }
+                modules.B.popup.open("#registerStepOne");
+            }
+            if (form.closest("#registerStepOne") && success) modules.B.popup.open("#registerStepTwo");
+            if (form.closest("#registerStepTwo") && success) modules.B.popup.open("#registerStepThree");
+            if (form.closest("#registerStepThree") && success) {
+                const finalTextEl = document.querySelector("#registerStepLast .authPopup__finaltext");
+                if (message && typeof message === "string" && message.trim() !== "" && finalTextEl) finalTextEl.innerHTML = message;
+                modules.B.popup.open("#registerStepLast");
+            }
         }));
         document.addEventListener("beforePopupClose", (e => {
             const form = e.detail.popup.targetOpen.element.querySelector("form");
             if (form) formValidate.formClean(form);
         }));
-        const middleSubMenuParents = document.querySelectorAll("[data-middlesubmenu-parent]");
-        const middleSubMenuChildrens = document.querySelectorAll("[data-middlesubmenu-children]");
-        if (middleSubMenuParents.length && middleSubMenuChildrens.length) subMenuActions(middleSubMenuParents, middleSubMenuChildrens);
+        document.addEventListener("change", (e => {
+            const target = e.target;
+            const mainParent = target.closest("[data-radio-spollers]");
+            if (mainParent) {
+                const parent = target.closest("[data-radio-spoller]");
+                const drops = mainParent.querySelectorAll("[data-radio-spoller-drop]");
+                drops.forEach((drop => {
+                    if (!parent || !parent.contains(drop)) {
+                        if (drop.querySelectorAll("[data-need-required]").length) drop.querySelectorAll("[data-need-required]").forEach((e => {
+                            e.removeAttribute("data-required");
+                        }));
+                        _slideUp(drop);
+                    } else {
+                        if (drop.querySelectorAll("[data-need-required]").length) drop.querySelectorAll("[data-need-required]").forEach((e => {
+                            e.setAttribute("data-required", "");
+                        }));
+                        _slideDown(drop);
+                    }
+                }));
+            }
+        }));
+        document.addEventListener("input", formMomoentValidate);
+        document.addEventListener("focusout", formMomoentValidate);
+        function formMomoentValidate(e) {
+            const target = e.target;
+            const form = target.closest("form");
+            if (form) {
+                const button = form.querySelector('[type="submit"]');
+                button.disabled = formValidate.getErrors(form, false) > 0 ? true : false;
+            }
+        }
         function cityChangeActions(citychange) {
             const citylinks = citychange.querySelectorAll("[data-number]");
             const cityoutput = citychange.querySelector("[data-output]");
